@@ -103,22 +103,12 @@ jobs:
         run: brew install ffmpeg srt pkg-config
 
       # ── Windows — pre-built FFmpeg from BtbN (includes SRT, MSVC .lib files) ──
-      # Avoids vcpkg whose `srt` port was removed from the registry.
-      - name: Install Windows dependencies
+      # ── Windows — install build tools for static FFmpeg linking ──────────
+      - name: Install Windows build tools
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $ProgressPreference = 'SilentlyContinue'
-          Write-Host "Downloading pre-built FFmpeg (BtbN GPL shared)..."
-          Invoke-WebRequest `
-            -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip" `
-            -OutFile "$env:TEMP\ffmpeg.zip" -UseBasicParsing
-          Expand-Archive "$env:TEMP\ffmpeg.zip" -DestinationPath "$env:TEMP\ffmpeg-src" -Force
-          $src = (Get-ChildItem "$env:TEMP\ffmpeg-src" -Directory | Select-Object -First 1).FullName
-          Move-Item $src "C:\ffmpeg" -Force
-
-          "FFMPEG_DIR=C:\ffmpeg"         >> $env:GITHUB_ENV
-          "PATH=C:\ffmpeg\bin;$env:PATH" >> $env:GITHUB_ENV
+          choco install make nasm --no-progress -y
 
       # ── Build ───────────────────────────────────────────────────────────────
       - name: Build release binary
@@ -143,15 +133,6 @@ jobs:
           New-Item -ItemType Directory -Path $DIST -Force
           Copy-Item "target/${{ matrix.target }}/release/screenstream.exe" "$DIST\"
           Copy-Item README.md "$DIST\" -ErrorAction SilentlyContinue
-
-          # Bundle FFmpeg DLLs (SRT is compiled into FFmpeg; OpenSSL bundled by BtbN)
-          $binDir = "C:\ffmpeg\bin"
-          @("avcodec-*.dll","avformat-*.dll","avutil-*.dll",
-            "swscale-*.dll","swresample-*.dll","avdevice-*.dll",
-            "srt*.dll","libssl*.dll","libcrypto*.dll") | ForEach-Object {
-            Get-ChildItem -Path $binDir -Filter $_ -ErrorAction SilentlyContinue |
-              Copy-Item -Destination "$DIST\"
-          }
 
           Compress-Archive -Path $DIST -DestinationPath "${DIST}.zip"
           "ASSET=${DIST}.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
