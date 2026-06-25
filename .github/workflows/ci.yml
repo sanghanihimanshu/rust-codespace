@@ -70,39 +70,23 @@ jobs:
           brew install ffmpeg srt pkg-config
 
       # ── Windows system dependencies ───────────────────────────────────────
-      # Use the vcpkg that ships pre-installed on GitHub Actions Windows runners
-      # (VCPKG_INSTALLATION_ROOT is always set; much more current than a pinned SHA).
+      # Use a pre-built FFmpeg from BtbN — includes SRT support, MSVC-compatible
+      # .lib files, and all DLLs. Avoids vcpkg whose `srt` port was removed.
       - name: Install Windows dependencies
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # pkg-config wrapper so Cargo can find native libs
-          choco install pkgconfiglite -y --no-progress
+          $ProgressPreference = 'SilentlyContinue'
+          Write-Host "Downloading pre-built FFmpeg (BtbN GPL shared)..."
+          Invoke-WebRequest `
+            -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip" `
+            -OutFile "$env:TEMP\ffmpeg.zip" -UseBasicParsing
+          Expand-Archive "$env:TEMP\ffmpeg.zip" -DestinationPath "$env:TEMP\ffmpeg-src" -Force
+          $src = (Get-ChildItem "$env:TEMP\ffmpeg-src" -Directory | Select-Object -First 1).FullName
+          Move-Item $src "C:\ffmpeg" -Force
 
-          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
-          if (-not $vcpkgRoot -or -not (Test-Path "$vcpkgRoot\vcpkg.exe") -or -not (Test-Path "$vcpkgRoot\ports\srt")) {
-            Write-Host "Using local vcpkg checkout because runner vcpkg is missing srt or not available."
-            Remove-Item -Recurse -Force .\vcpkg -ErrorAction SilentlyContinue
-            git clone --depth 1 https://github.com/microsoft/vcpkg.git .\vcpkg
-            .\vcpkg\bootstrap-vcpkg.bat
-            $vcpkgRoot = (Resolve-Path .\vcpkg).Path
-          }
-
-          $vcpkg = "$vcpkgRoot\vcpkg.exe"
-          if (-not (Test-Path $vcpkg)) {
-            throw "vcpkg not found at $vcpkg"
-          }
-
-          & $vcpkg install ffmpeg:x64-windows srt:x64-windows --triplet x64-windows
-
-          $pkgPath = "$vcpkgRoot\installed\x64-windows\lib\pkgconfig"
-          if (-not (Test-Path $pkgPath)) {
-            throw "PKG_CONFIG_PATH directory not found: $pkgPath"
-          }
-
-          $binPath = "$vcpkgRoot\installed\x64-windows\bin"
-          "PKG_CONFIG_PATH=$pkgPath"    >> $env:GITHUB_ENV
-          "PATH=$binPath;$env:PATH"     >> $env:GITHUB_ENV
+          "FFMPEG_DIR=C:\ffmpeg"         >> $env:GITHUB_ENV
+          "PATH=C:\ffmpeg\bin;$env:PATH" >> $env:GITHUB_ENV
 
       # ── Build ─────────────────────────────────────────────────────────────
       - name: Build (release)
