@@ -72,6 +72,12 @@ coreaudio-sys = "0.2"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = ["Win32_System_Power"] }
 
+# ── Patch ffmpeg-sys-next to skip GNU-only linker flag on Windows MSVC ───────
+# The upstream build.rs unconditionally emits `-Wl,--no-as-needed`, which MSVC
+# link.exe treats as a filename → fatal LNK1181.  Our vendor copy gates it.
+[patch.crates-io]
+ffmpeg-sys-next = { path = "vendor/ffmpeg-sys-next" }
+
 # ── Build profiles ────────────────────────────────────────────────────────────
 [profile.release]
 opt-level     = 3
