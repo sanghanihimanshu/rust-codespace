@@ -66,6 +66,12 @@ rand   = "0.8"
 [target.'cfg(target_os = "macos")'.dependencies]
 coreaudio-sys = "0.2"
 
+# ── Windows: supply the Win32_System_Power feature missing from the Zed
+# workspace at the pinned commit — Cargo merges features across all dependents
+# so this is enough to unlock windows::Win32::System::Power in gpui_windows.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_System_Power"] }
+
 # ── Build profiles ────────────────────────────────────────────────────────────
 [profile.release]
 opt-level     = 3
