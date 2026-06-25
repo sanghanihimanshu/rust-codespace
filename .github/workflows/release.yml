@@ -111,19 +111,28 @@ jobs:
         run: |
           choco install pkgconfiglite -y --no-progress
 
-          $vcpkg = "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe"
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot -or -not (Test-Path "$vcpkgRoot\vcpkg.exe") -or -not (Test-Path "$vcpkgRoot\ports\srt")) {
+            Write-Host "Using local vcpkg checkout because runner vcpkg is missing srt or not available."
+            Remove-Item -Recurse -Force .\vcpkg -ErrorAction SilentlyContinue
+            git clone --depth 1 https://github.com/microsoft/vcpkg.git .\vcpkg
+            .\vcpkg\bootstrap-vcpkg.bat
+            $vcpkgRoot = (Resolve-Path .\vcpkg).Path
+          }
+
+          $vcpkg = "$vcpkgRoot\vcpkg.exe"
           if (-not (Test-Path $vcpkg)) {
             throw "vcpkg not found at $vcpkg"
           }
 
           & $vcpkg install ffmpeg:x64-windows srt:x64-windows --triplet x64-windows
 
-          $pkgPath = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
+          $pkgPath = "$vcpkgRoot\installed\x64-windows\lib\pkgconfig"
           if (-not (Test-Path $pkgPath)) {
             throw "PKG_CONFIG_PATH directory not found: $pkgPath"
           }
 
-          $binPath = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin"
+          $binPath = "$vcpkgRoot\installed\x64-windows\bin"
           "PKG_CONFIG_PATH=$pkgPath" >> $env:GITHUB_ENV
           "PATH=$binPath;$env:PATH"  >> $env:GITHUB_ENV
 
