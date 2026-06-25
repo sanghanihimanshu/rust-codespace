@@ -1,0 +1,208 @@
+name: Release
+
+# Triggers on a semantic-version tag push:  git tag v1.2.3 && git push --tags
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── 1. Auto-bump Cargo.toml version to match the tag ───────────────────────
+  version-bump:
+    name: Bump Cargo.toml version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: extract
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tag version: $VERSION"
+
+      - name: Update Cargo.toml version
+        run: |
+          sed -i "s/^version *= *\"[^\"]*\"/version = \"${{ steps.extract.outputs.version }}\"/" Cargo.toml
+          cargo generate-lockfile 2>/dev/null || true
+
+      - name: Commit version bump
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git diff --staged --quiet || \
+            git commit -m "chore: bump version to ${{ steps.extract.outputs.version }} [skip ci]"
+          git push origin HEAD:main || true  # non-fatal; might be protected branch
+
+  # ── 2. Build release binaries (same matrix as CI) ─────────────────────────
+  build:
+    name: Build ${{ matrix.artifact }}
+    needs: version-bump
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            artifact: screenstream-linux-x86_64
+            ext: ""
+
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: screenstream-macos-arm64
+            ext: ""
+
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: screenstream-macos-x86_64
+            ext: ""
+
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            artifact: screenstream-windows-x86_64
+            ext: ".exe"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libavcodec-dev libavformat-dev libavutil-dev \
+            libswscale-dev libswresample-dev libavdevice-dev \
+            libsrt-openssl-dev \
+            libxkbcommon-dev libwayland-dev \
+            libx11-dev libxrandr-dev libxcb1-dev \
+            libfontconfig1-dev libfreetype6-dev \
+            libasound2-dev libpulse-dev \
+            clang cmake pkg-config
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg srt pkg-config
+
+      - name: Install Windows dependencies (vcpkg)
+        if: runner.os == 'Windows'
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 'a42af01b72c28a8e1d7b48107b33e4f286a55ef6'
+      - name: vcpkg install (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install ffmpeg:x64-windows srt:x64-windows
+          echo "PKG_CONFIG_PATH=$env:VCPKG_ROOT/installed/x64-windows/lib/pkgconfig" >> $env:GITHUB_ENV
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # Package into a .tar.gz (Linux/macOS) or .zip (Windows)
+      - name: Package (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          DIST="${{ matrix.artifact }}-${{ needs.version-bump.outputs.version }}"
+          mkdir "$DIST"
+          cp "target/${{ matrix.target }}/release/screenstream" "$DIST/"
+          cp README.md "$DIST/" 2>/dev/null || true
+          tar -czf "${DIST}.tar.gz" "$DIST"
+          echo "ASSET=${DIST}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $DIST = "${{ matrix.artifact }}-${{ needs.version-bump.outputs.version }}"
+          New-Item -ItemType Directory -Path $DIST
+          Copy-Item "target/${{ matrix.target }}/release/screenstream.exe" $DIST/
+          Copy-Item README.md $DIST/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path $DIST -DestinationPath "${DIST}.zip"
+          echo "ASSET=${DIST}.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-pkg
+          path: ${{ env.ASSET }}
+          retention-days: 1
+
+  # ── 3. Create GitHub Release and attach binaries ───────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [version-bump, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-pkg'
+          merge-multiple: true
+          path: dist/
+
+      - name: Generate changelog from git log
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | sed -n '2p')
+          if [ -n "$PREV_TAG" ]; then
+            LOG=$(git log --oneline "${PREV_TAG}..HEAD" | head -40)
+          else
+            LOG=$(git log --oneline | head -20)
+          fi
+          echo "CHANGELOG<<EOF" >> "$GITHUB_ENV"
+          echo "$LOG" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "ScreenStream ${{ needs.version-bump.outputs.version }}"
+          body: |
+            ## ScreenStream ${{ needs.version-bump.outputs.version }}
+
+            High-quality, encrypted local-network screen streaming.
+            OBS connects via **SRT + AES-256** — no internet required.
+
+            ### Changes
+            ```
+            ${{ env.CHANGELOG }}
+            ```
+
+            ### OBS Setup
+            1. Download the binary for your OS below.
+            2. Run `screenstream` — note the SRT URL shown in the window.
+            3. In OBS: **Sources → + → Media Source → uncheck "Local File" → paste URL**.
+            4. The stream is AES-256 encrypted end-to-end.
+
+            ### Binaries
+            | Platform | File |
+            |---|---|
+            | Linux x86-64 | `screenstream-linux-x86_64-*.tar.gz` |
+            | macOS Apple Silicon | `screenstream-macos-arm64-*.tar.gz` |
+            | macOS Intel | `screenstream-macos-x86_64-*.tar.gz` |
+            | Windows x86-64 | `screenstream-windows-x86_64-*.zip` |
+          files: dist/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: false

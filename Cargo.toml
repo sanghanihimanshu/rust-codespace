@@ -1,8 +1,77 @@
 [package]
-name = "hello_remote_world"
-version = "0.1.0"
-authors = ["VS Code <vscode@microsoft.com>"]
+name        = "screenstream"
+version     = "0.1.0"
+edition     = "2021"
+description = "High-quality encrypted local-network screen streaming with OBS support"
+license     = "MIT"
 
 [[bin]]
-name = "hello_remote_world"
-path = "test-project/src/main.rs"
+name = "screenstream"
+path = "src/main.rs"
+
+[dependencies]
+# ── Core UI (GPU-accelerated, from the Zed editor) ──────────────────────────
+gpui          = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform" }
+
+# ── Async runtime ────────────────────────────────────────────────────────────
+tokio  = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# ── Cross-platform screen capture (X11/WGC/ScreenCaptureKit) ────────────────
+# Use open-gpui-scap — maintained by the Zed/GPUI team, API-compatible with scap
+scap = { package = "open-gpui-scap", version = "0.1.0-beta.1" }
+
+# ── Cross-platform audio I/O (mic + loopback device selection) ───────────────
+cpal = "0.15"
+
+# ── FFmpeg: encode H.264/AAC + SRT-mux all in one pipeline ──────────────────
+ffmpeg-next = { version = "8", features = [
+    "codec",
+    "format",
+    "software-scaling",
+    "software-resampling",
+] }
+
+# ── Zero-config LAN discovery ────────────────────────────────────────────────
+mdns-sd = "0.11"
+
+# ── Network helpers ──────────────────────────────────────────────────────────
+local-ip-address = "0.6"
+if-addrs          = "0.15"
+
+# ── Serialization ────────────────────────────────────────────────────────────
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ── Error handling ───────────────────────────────────────────────────────────
+anyhow    = "1"
+thiserror = "2"
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# ── Concurrency primitives ───────────────────────────────────────────────────
+crossbeam-channel = "0.5"
+parking_lot       = "0.12"
+arc-swap          = "1"
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+uuid   = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+rand   = "0.8"
+
+# ── macOS: system-audio tap via CoreAudio ────────────────────────────────────
+[target.'cfg(target_os = "macos")'.dependencies]
+coreaudio-sys = "0.2"
+
+# ── Build profiles ────────────────────────────────────────────────────────────
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
+strip         = "debuginfo"
+
+[profile.dev]
+opt-level = 1
