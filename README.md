@@ -15,7 +15,7 @@ OBS connects via a standard SRT URL — no internet required.
 ---
 
 ## Features
-
+ 
 | Feature | Detail |
 |---|---|
 | **Codec** | H.264 (`libx264`) or H.265 (`libx265`) via FFmpeg |
