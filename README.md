@@ -66,13 +66,22 @@ cargo build --release
 
 ### Windows
 
-Install [vcpkg](https://vcpkg.io), then:
+Install [vcpkg](https://vcpkg.io) and set `VCPKG_ROOT` to your vcpkg checkout root.
 
 ```powershell
-vcpkg install ffmpeg:x64-windows srt:x64-windows
+cd C:\vcpkg
+.\vcpkg.exe install ffmpeg:x64-windows srt:x64-windows --triplet x64-windows
 $env:PKG_CONFIG_PATH = "$env:VCPKG_ROOT\installed\x64-windows\lib\pkgconfig"
 cargo build --release
 .\target\release\screenstream.exe
+```
+
+If `srt:x64-windows` fails with `C:\vcpkg\ports\srt: error: srt does not exist`, update and bootstrap your vcpkg tree:
+
+```powershell
+git pull
+.\bootstrap-vcpkg.bat
+.\vcpkg.exe install ffmpeg:x64-windows srt:x64-windows --triplet x64-windows
 ```
 
 ---
