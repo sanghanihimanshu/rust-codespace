@@ -66,10 +66,9 @@ rand   = "0.8"
 [target.'cfg(target_os = "macos")'.dependencies]
 coreaudio-sys = "0.2"
 
-# ── Windows: supply the Win32_System_Power feature missing from the Zed
-# workspace at the pinned commit — Cargo merges features across all dependents
-# so this is enough to unlock windows::Win32::System::Power in gpui_windows.
+# ── Windows: static-link FFmpeg so the released exe does not require DLLs.
 [target.'cfg(target_os = "windows")'.dependencies]
+ffmpeg-next = { version = "8", features = ["static"] }
 windows = { version = "0.61", features = ["Win32_System_Power"] }
 
 # ── Patch ffmpeg-sys-next to skip GNU-only linker flag on Windows MSVC ───────
