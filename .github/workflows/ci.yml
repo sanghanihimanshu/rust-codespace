@@ -64,6 +64,8 @@ jobs:
             libx11-dev libxrandr-dev libxcb1-dev \
             libfontconfig1-dev libfreetype6-dev \
             libasound2-dev libpulse-dev \
+            libpipewire-0.3-dev libspa-0.2-dev \
+            libdbus-1-dev \
             clang cmake pkg-config
 
       # ── macOS system dependencies ─────────────────────────────────────────
@@ -73,16 +75,24 @@ jobs:
           brew install ffmpeg srt pkg-config
 
       # ── Windows system dependencies ───────────────────────────────────────
-      - name: Install Windows dependencies (vcpkg)
+      # Use the vcpkg that ships pre-installed on GitHub Actions Windows runners
+      # (VCPKG_INSTALLATION_ROOT is always set; much more current than a pinned SHA).
+      - name: Install Windows dependencies
         if: runner.os == 'Windows'
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: 'a42af01b72c28a8e1d7b48107b33e4f286a55ef6'
-      - name: vcpkg install packages (Windows)
-        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          vcpkg install ffmpeg:x64-windows srt:x64-windows
-          echo "PKG_CONFIG_PATH=$env:VCPKG_ROOT/installed/x64-windows/lib/pkgconfig" >> $env:GITHUB_ENV
+          # pkg-config wrapper so Cargo can find native libs
+          choco install pkgconfiglite -y --no-progress
+
+          $vcpkg = "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe"
+
+          # ffmpeg brings avcodec/avformat/swscale/swresample
+          & $vcpkg install ffmpeg:x64-windows srt:x64-windows --triplet x64-windows
+
+          $pkgPath = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
+          $binPath = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin"
+          "PKG_CONFIG_PATH=$pkgPath"    >> $env:GITHUB_ENV
+          "PATH=$binPath;$env:PATH"     >> $env:GITHUB_ENV
 
       # ── Build ─────────────────────────────────────────────────────────────
       - name: Build (release)
@@ -135,6 +145,8 @@ jobs:
             libxkbcommon-dev libwayland-dev libx11-dev \
             libfontconfig1-dev libfreetype6-dev \
             libasound2-dev libpulse-dev \
+            libpipewire-0.3-dev libspa-0.2-dev \
+            libdbus-1-dev \
             clang cmake pkg-config
 
       - name: Clippy

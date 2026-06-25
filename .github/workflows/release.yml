@@ -45,7 +45,7 @@ jobs:
             git commit -m "chore: bump version to ${{ steps.extract.outputs.version }} [skip ci]"
           git push origin HEAD:main || true  # non-fatal; might be protected branch
 
-  # ── 2. Build release binaries (same matrix as CI) ─────────────────────────
+  # ── 2. Build release binaries ──────────────────────────────────────────────
   build:
     name: Build ${{ matrix.artifact }}
     needs: version-bump
@@ -85,6 +85,7 @@ jobs:
         with:
           key: release-${{ matrix.target }}
 
+      # ── Linux ───────────────────────────────────────────────────────────────
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -97,28 +98,38 @@ jobs:
             libx11-dev libxrandr-dev libxcb1-dev \
             libfontconfig1-dev libfreetype6-dev \
             libasound2-dev libpulse-dev \
+            libpipewire-0.3-dev libspa-0.2-dev \
+            libdbus-1-dev \
             clang cmake pkg-config
 
+      # ── macOS ───────────────────────────────────────────────────────────────
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: brew install ffmpeg srt pkg-config
 
-      - name: Install Windows dependencies (vcpkg)
+      # ── Windows — use the pre-installed, up-to-date vcpkg ─────────────────
+      # VCPKG_INSTALLATION_ROOT is always set on GitHub Actions Windows runners
+      # and is considerably more current than any pinned SHA in the workflow.
+      - name: Install Windows dependencies
         if: runner.os == 'Windows'
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: 'a42af01b72c28a8e1d7b48107b33e4f286a55ef6'
-      - name: vcpkg install (Windows)
-        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          vcpkg install ffmpeg:x64-windows srt:x64-windows
-          echo "PKG_CONFIG_PATH=$env:VCPKG_ROOT/installed/x64-windows/lib/pkgconfig" >> $env:GITHUB_ENV
+          choco install pkgconfiglite -y --no-progress
 
+          $vcpkg = "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe"
+          & $vcpkg install ffmpeg:x64-windows srt:x64-windows --triplet x64-windows
+
+          $pkgPath = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
+          $binPath = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin"
+          "PKG_CONFIG_PATH=$pkgPath" >> $env:GITHUB_ENV
+          "PATH=$binPath;$env:PATH"  >> $env:GITHUB_ENV
+
+      # ── Build ───────────────────────────────────────────────────────────────
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
-      # Package into a .tar.gz (Linux/macOS) or .zip (Windows)
-      - name: Package (Linux/macOS)
+      # ── Package ─────────────────────────────────────────────────────────────
+      - name: Package (Linux / macOS)
         if: runner.os != 'Windows'
         run: |
           DIST="${{ matrix.artifact }}-${{ needs.version-bump.outputs.version }}"
@@ -130,13 +141,22 @@ jobs:
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           $DIST = "${{ matrix.artifact }}-${{ needs.version-bump.outputs.version }}"
-          New-Item -ItemType Directory -Path $DIST
-          Copy-Item "target/${{ matrix.target }}/release/screenstream.exe" $DIST/
-          Copy-Item README.md $DIST/ -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $DIST -Force
+          Copy-Item "target/${{ matrix.target }}/release/screenstream.exe" "$DIST\"
+          Copy-Item README.md "$DIST\" -ErrorAction SilentlyContinue
+
+          # Bundle required vcpkg DLLs so the .exe is self-contained
+          $binDir = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin"
+          @("avcodec-*.dll","avformat-*.dll","avutil-*.dll",
+            "swscale-*.dll","swresample-*.dll","srt.dll") | ForEach-Object {
+            Get-ChildItem -Path $binDir -Filter $_ | Copy-Item -Destination "$DIST\"
+          }
+
           Compress-Archive -Path $DIST -DestinationPath "${DIST}.zip"
-          echo "ASSET=${DIST}.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ASSET=${DIST}.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload release asset
         uses: actions/upload-artifact@v4
@@ -145,7 +165,7 @@ jobs:
           path: ${{ env.ASSET }}
           retention-days: 1
 
-  # ── 3. Create GitHub Release and attach binaries ───────────────────────────
+  # ── 3. Create GitHub Release ────────────────────────────────────────────────
   release:
     name: Create GitHub Release
     needs: [version-bump, build]
@@ -201,7 +221,7 @@ jobs:
             | Linux x86-64 | `screenstream-linux-x86_64-*.tar.gz` |
             | macOS Apple Silicon | `screenstream-macos-arm64-*.tar.gz` |
             | macOS Intel | `screenstream-macos-x86_64-*.tar.gz` |
-            | Windows x86-64 | `screenstream-windows-x86_64-*.zip` |
+            | Windows x86-64 | `screenstream-windows-x86_64-*.zip` (FFmpeg DLLs bundled) |
           files: dist/*
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
